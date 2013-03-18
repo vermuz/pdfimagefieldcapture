@@ -1,0 +1,117 @@
+<?php
+/***************************************************************************************
+/*
+* Disable display of the field_issuecover field. This could lead to problems later, 
+* but will simplify the process for now.
+*/
+//***************************************************************************************
+function pdf_imagefield_preview_generator_form_alter(&$form, $form_state, $form_id) 
+{
+   if (isset($form['type']) && isset($form['#node'])) 
+   {
+	      if ($form_id === 'issue_node_form') 
+        {
+           //Hide title after form generation 
+           $form['title']['#type'] = 'hidden';
+           //Build and save the title field.
+           $form['title']['#default_value']= 'tmp';
+        }
+   }
+}
+//***************************************************************************************
+//Build a Title while form is being submitted
+function pdf_imagefield_preview_generator_node_submit($node, $form, &$form_state)
+{
+  if (isset($form['type']) && isset($form['#node'])) 
+  {
+      if($node->type == 'issue')
+      {
+         $titletexttouse = 
+	       "Volume ".$node->field_issuevolume['und'][0]['value'].", 
+	       Issue ".$node->field_issuenumber['und'][0]['value']." (".
+	       $node->field_issuemonthvalue['und'][0]['value'].")";
+	       $node->title = $titletexttouse;
+      }
+  }
+}
+//****************************************************************************************
+//Build a preview of the PDF
+function pdf_imagefield_preview_generator_node_presave($node)
+{
+  if($node->type == 'issue')
+  {
+    generatePdfImagePreviews($node);
+  }
+}
+//****************************************************************************************
+/*
+ * Functions Below to generate jpg previews of PDF nodes and store them in a CCK imagefield.
+ * This is a quick function and should really have menu selections to choose source
+ * and target fields.
+ * 
+ * A bit of this stolen from 'PDF to ImageField' module.
+ */
+ 
+/*
+ * Return source and target CCK fields.
+ * FOR NOW : Source and target CCK fields are Hardcoded here. Use is SOURCE=>TARGET
+ * In future, would be great to have selected through admin menu.
+ */
+//******************************************************************************************
+function generateSourceTargetArray() 
+{
+    $returnArray=array(
+    "field_fullissuepdf" => "field_issuecover",
+    );
+    return($returnArray);
+}
+
+function generatePdfImagePreviews(&$node) 
+{
+    $arrayOfPreviews=array();
+    $arrayOfPreviews=generateSourceTargetArray();
+    foreach ($arrayOfPreviews as $sourceField => $targetField) 
+    {
+       $sourcePdfFileId=$node->{$sourceField}['und'][0]['fid'];
+       $sourcePdfFileObject= file_load($sourcePdfFileId);
+       $sourcePdfFilePath = drupal_realpath($sourcePdfFileObject->uri);
+       // If it exists, Delete file from DB for this pdf.
+       if(isset($node->{$targetField}['und'][0]))
+       {
+         file_delete(file_load($node->{$targetField}['und'][0]['fid']));
+       }
+       $targetImageField=$targetField;
+       //Creates a file with a unique filename, with access permission set to 0600, in the specified directory. 
+       //If the directory //does not exist, tempnam() may generate a file in the system's temporary directory, and return the name.
+       $tmpImageName=tempnam(sys_get_temp_dir(),'').'.jpg';
+       $convertedFilePathExists=generatePdfFirstPageImage($sourcePdfFilePath,$tmpImageName);
+          if ($convertedFilePathExists != TRUE) 
+          {
+            watchdog('pdf to image: imageapi imagemagick', '!errors', array('!errors' => $errors_txt), WATCHDOG_ERROR);
+          }
+          else
+          {
+              $source = $tmpImageName;
+              $handle = fopen($tmpImageName, 'r');
+              $file = file_save_data($handle, 'public://'.str_replace('pdf','jpg', basename($sourcePdfFilePath)));
+              fclose($handle);
+              if ($file)
+              {
+                 $file->status = FILE_STATUS_PERMANENT;
+                 file_save($file);
+              } 
+              $node->{$targetField}['und'][0] = (array) $file;
+          }
+    }
+}
+//******************************************************************************************
+/*
+ * Function to convert PDF into jpg thumbnail of first page only.
+ */	
+function generatePdfFirstPageImage($source, $dest, $args = array(), $extra = array()) 
+{
+        $returncommand=_imagemagick_convert_exec($source.'[0] '.$dest,$output, $errors);
+        return file_exists($dest);
+}
+
+?>
